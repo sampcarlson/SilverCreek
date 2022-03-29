@@ -68,7 +68,12 @@ buildLocationTimeseries=function(observations,allRoutes){ #must have a 'fishID' 
 
 locationTimeseries=buildLocationTimeseries(observations=fishObs,allRoutes=routes)
 
-locationTimeseries$dateTimeNumeric=as.numeric(locationTimeseries$dateTime)
+#locationTimeseries$dateTimeNumeric=as.numeric(locationTimeseries$dateTime)
+
+locationTimeseries=st_as_sf(locationTimeseries,coords=c("X","Y"))
+st_crs(locationTimeseries)=st_crs(32611)
+
+locationTimeseries=st_transform(locationTimeseries,crs=st_crs(4326))
 
 format(object.size(locationTimeseries),units="Mb")
 

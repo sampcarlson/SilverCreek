@@ -13,7 +13,6 @@ plot(network$geom,col="blue")
 
 
 ##################Leaflet app is in 4326.  Reproject for easier use there:
-
-st_transform(network,crs=st_crs(4326))
+network=st_transform(network,crs=st_crs(4326))
 #save to .rds file for simple access
 saveRDS(network,file="C:/Users/sam/Documents/SilverCreek/R/SilverCreekApp/network.rds")

@@ -54,7 +54,7 @@ plot(nr)
 #barrier cost surface
 #costSurface=create_barrier_cs(raster=raster(nr),barrier=raster(nr),field="mask")
 
-
+#sometimes throws 'Error in x$.self$finalize() : attempt to apply non-function' but works anyway????
 costSurface=create_slope_cs(dem=raster(nr),cost_function="wheeled transport",max_slope=10)
 
 

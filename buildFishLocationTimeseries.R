@@ -71,3 +71,5 @@ locationTimeseries=buildLocationTimeseries(observations=fishObs,allRoutes=routes
 locationTimeseries$dateTimeNumeric=as.numeric(locationTimeseries$dateTime)
 
 format(object.size(locationTimeseries),units="Mb")
+
+write.csv(locationTimeseries,"C:\\Users\\sam\\Documents\\SilverCreek\\R\\SilverCreekApp\\fishLocationTimeseries.csv")

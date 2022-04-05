@@ -94,15 +94,16 @@ for(i in 1:nrow(allRouteIDs)){
   } else { allRoutes=rbind(allRoutes,thisRoute) }
 }
 row.names(allRoutes)=allRoutes$routeName
-
+allRoutes=st_as_sf(allRoutes)
 
 plot(st_geometry(network),col="blue")
 plot(st_geometry(arrays),add=T,pch=as.character(arrays$ID))
 plot(st_geometry(allRoutes),add=T,lwd=4)
 
+plot(st_geometry(allRoutes[29,]),add=T,lwd=4)
 
-st_write(allRoutes,"allRoutes.gpkg",append=F)
+st_write(allRoutes,"allRoutes.gpkg",append=F,overwrite=T)
 
 #writeRaster(nr,"NetRast.tif",overwrite=T)
-st_write(arrays,"arrays.gpkg",overwrite=T)
+#st_write(arrays,"arrays.gpkg",overwrite=T)
 

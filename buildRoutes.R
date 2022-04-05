@@ -76,8 +76,8 @@ buildRoute=function(from,to,costSurf,arySites){
   }else{
     
     route=shortestPath(costSurf, 
-                       origin=st_coordinates(arySites[to,]),
-                       goal=st_coordinates(arySites[from,]),
+                       origin=st_coordinates(arySites[from,]),
+                       goal=st_coordinates(arySites[to,]),
                        output="SpatialLines")
     route=st_as_sf(route)
   }

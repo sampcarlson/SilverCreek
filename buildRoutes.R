@@ -1,9 +1,8 @@
 library(sf)
 library(terra)
+library(gdistance)
 
-library(leastcostpath)
-
-library(raster)#needed for type conversions within leastcostpath
+library(raster) #still needed for type conversions within gdistance::transition
 
 #sources
 netDSN="C:/Users/sam/Documents/spatial/SilverCreek/SilverCreekNet.gpkg"
@@ -29,8 +28,8 @@ snapPointsToLines=function(points_to_snap,target_lines){
   for(i in 1:nrow(points_to_snap)){ #iterate through points
     near=st_nearest_points(points_to_snap[i,],snapPoints)  #find line to all snapPoints
     thisLocation=st_geometry( 
-      st_cast(near[which.min(st_length(near))],"POINT")[2] 
-    )  #find geometry of nearest snap point. [2] returns 'to' point of st_nearest line
+      st_cast(near[which.min(st_length(near))],"POINT")[2] #find geometry of nearest snap point. [2] returns 'to' point of st_nearest line
+    )  
     print(paste("Snapped point",points_to_snap$Name[i],"to target line", round(st_distance(points_to_snap[i,],thisLocation),1), "meters"))
     points_to_snap[i,]$geom=thisLocation
   }
@@ -40,23 +39,21 @@ snapPointsToLines=function(points_to_snap,target_lines){
 arrays=snapPointsToLines(points_to_snap = arrays,target_lines = network)
 
 
+network$weight=1 
+rastRes=5#reducing resolution vastly speeds up process
+nr=terra::rast(vect(network),res=rastRes,crs="EPSG:32611",vals=NA) 
 
-network$weight=1 #for barrier raster, network = 1, upland = 0
-# high res here can cause some issues w/ the route finder if using barrier cost method...
-networkRaster=terra::rast(vect(network),res=10,crs="EPSG:32611",vals=90)
+netBuff=st_buffer(network,dist=2*rastRes)
+netBuff$weight=0.1
 
 # not sure why, but only works w/ update = T
-nr=terra::rasterize(vect(network),networkRaster,field="weight",update=T)
 
+nr=terra::rasterize(vect(netBuff),nr,field="weight",update=T)
+nr=terra::rasterize(vect(network),nr,field="weight",update=T)
 #check...
-plot(nr)
+#plot(nr)
 
-#barrier cost surface
-#costSurface=create_barrier_cs(raster=raster(nr),barrier=raster(nr),field="mask")
-
-#sometimes throws 'Error in x$.self$finalize() : attempt to apply non-function' but works anyway????
-costSurface=create_slope_cs(dem=raster(nr),cost_function="wheeled transport",max_slope=10)
-
+costSurface=transition(raster::raster(nr),transitionFunction=prod,directions=8)
 
 #make df of all route ids
 arrays$ID=row.names(arrays)
@@ -65,18 +62,31 @@ names(allRouteIDs)=c("from","to")
 
 buildRoute=function(from,to,costSurf,arySites){
   routeName=paste0(from,"_to_",to)
-  route=create_lcp(cost_surface = costSurf,
-                   origin=as(arySites[to,],"Spatial"),
-                   destination=as(arySites[from,],"Spatial"),
-                   directional=T)
-  route=st_as_sf(route)
+  print(routeName)
+  
+  if(from==to){ #return a 'linestring' from/to the same point
+    coords=st_coordinates(arySites[from,])
+    routePoint=st_point(coords)
+    route=st_linestring(c(routePoint,routePoint))
+    route=st_sfc(route,crs="EPSG:32611")
+    #route=data.frame(route)
+    route=st_as_sf(route)
+    route$geometry=st_geometry(route)
+    route$x=NULL
+  }else{
+    
+    route=shortestPath(costSurf, 
+                       origin=st_coordinates(arySites[to,]),
+                       goal=st_coordinates(arySites[from,]),
+                       output="SpatialLines")
+    route=st_as_sf(route)
+  }
   route$routeName=routeName
   return(route)
 }
 
-#could use sapply, but then I get a list of sf objects rather than a 'multi' sf object
+#could apply, but then I get a list of sf objects rather than a 'multi' sf object
 for(i in 1:nrow(allRouteIDs)){
-  print(i)
   thisRoute=buildRoute(from=allRouteIDs$from[i], to=allRouteIDs$to[i],
                        costSurf = costSurface, arySites = arrays)
   if(i==1){
@@ -88,6 +98,11 @@ row.names(allRoutes)=allRoutes$routeName
 
 plot(st_geometry(network),col="blue")
 plot(st_geometry(arrays),add=T,pch=as.character(arrays$ID))
-plot(st_geometry(allRoutes["8_to_2",]),add=T,lwd=4)
+plot(st_geometry(allRoutes),add=T,lwd=4)
 
-st_write(allRoutes,"allRoutes.gpkg")
+
+st_write(allRoutes,"allRoutes.gpkg",append=F)
+
+#writeRaster(nr,"NetRast.tif",overwrite=T)
+st_write(arrays,"arrays.gpkg",overwrite=T)
+

@@ -6,11 +6,20 @@ destDir=paste0(destDir,"/",Sys.Date())
 dir.create(destDir)
 
 ssc=new_handle(verbose=F,username="Tagging@savesilvercreek.com",password=Sys.getenv("SSC_PASS"))
-sscUrl="ftp://savesilvercreek.com/"
+
+#for all files:
+#sscUrl="ftp://savesilvercreek.com/"
+
+#for track a trout only:
+sscUrl="ftp://savesilvercreek.com/Track_A_Trout/"
 
 
 #ftp test
-sscContent=data.table::fread(rawToChar(curl_fetch_memory(sscUrl,ssc)$content),blank.lines.skip = T)
+c=rawToChar(curl_fetch_memory(sscUrl,ssc)$content)
+
+
+sscContent=data.table::fread(rawToChar(curl_fetch_memory(sscUrl,ssc)$content),blank.lines.skip = T,fill=T)
+
 #look ok?
 sscContent
 

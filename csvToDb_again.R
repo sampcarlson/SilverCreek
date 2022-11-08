@@ -67,7 +67,7 @@ dlTroutData=function(){
 
 #dataDir=dlTroutData()
 
-dataDir="C:/Users/sam/Documents/SilverCreek/R/SilverCreekFishTracker/troutDL_2022-10-17"
+dataDir="C:/Users/sam/Documents/SilverCreek/R/SilverCreekFishTracker/troutDL_2022-11-07"
 
 #need: list of all fish ids, locationTimeseries(s), fish metadata (species, size, ,'owner', image, notes)
 #also - keep track of all files included
@@ -76,7 +76,7 @@ includedFiles=NULL
 updateData=function(subDir,baseDir=dataDir,headers,skipLines=0,renames=renameKey){
   
   renameDF=data.frame(old=names(renames), new=unlist(renames))
-
+  
   
   files=list.files(paste0(dataDir,"/",subDir))
   files=paste0(subDir,"/",files)
@@ -103,7 +103,7 @@ updateData=function(subDir,baseDir=dataDir,headers,skipLines=0,renames=renameKey
         addRows$LATITUDE.LONGITUDE=addRows$obs2_location
         addRows$Scan.Date=addRows$obs2_date
         thisData=rbind(thisData,addRows)
-        }
+      }
       
       if(all(c("obs3_location","obs3_date") %in% names(thisData))){
         addRows=thisData
@@ -149,7 +149,7 @@ renameKey=list("Second.Detiction.location"="obs2_location",
                "Third.Detection"="obs3_location",
                "Third.Detection.location"="obs3_location",
                "Third.Detection.Date"="obs3_date"
-               )
+)
 
 
 ################from Fish&Game, metadata on initial capture -------------
@@ -234,14 +234,30 @@ mobData$dateTime=as.POSIXct(mobData$Date.Time,format="%m/%d/%Y %H:%M")
 readData=updateData("Reader_Data",headers=c("Scan.Date","Scan.Time","Reader.ID","HEX.Tag.ID","DEC.Tag.ID","LATITUDE.LONGITUDE","Species","Length.Inches","Client"))
 
 readDataCoord=function(latLon,which="lat"){
-  latLon=strsplit(latLon,", ")[[1]]
-  if(length(latLon)==2){
-    lat=as.numeric(latLon[1])
-    lon=as.numeric(latLon[2])
+  #print(latLon)
+  #print(!is.na(latLon) & nchar(latLon)>=6)
+  if( !is.na(latLon) & nchar(latLon)>=6){
+    latLon=sub(" ","",latLon)
+    latLon=strsplit(latLon,",")[[1]]
+    if(length(latLon)==2){
+      lat=as.numeric(latLon[1])
+      lon=as.numeric(latLon[2])
+    } else {
+      latLon=strsplit(latLon,"-")[[1]]
+      if(length(latLon)==2){
+        lat=as.numeric(latLon[1])
+        lon=as.numeric(latLon[2])
+        lon=-lon
+      } else {
+        lat=NA
+        lon=NA
+      }
+    }
   } else {
     lat=NA
     lon=NA
   }
+  #print(paste0(lat,", ",lon))
   if(which=="lat"){
     return(lat)
   }
@@ -272,13 +288,15 @@ fgData$lon=NA
 for(i in 1:nrow(fgData)){
   thisDate=fgData[i,'dateTime']
   d=difftime(thisDate,imgData$dateTime,units="hours")
-  if(min(d)<6){
-    fgData$lat[i]=imgData$lat[which.min(d)]
-    fgData$lon[i]=imgData$lon[which.min(d)]
+  #print(d[which.min(d)])
+  thisImgDataRow=which.min(d)
+  if(abs(d[thisImgDataRow])<6){  # if there is a imgData record within 6 hours
+    fgData$lat[i]=imgData$lat[thisImgDataRow]
+    fgData$lon[i]=imgData$lon[thisImgDataRow]
     #for fish which are in both datasets, this creates a redundant record 
     #w/ a slightly different dateTime (as fg time is set to defaultTime)
     #take img dateTime to make it easy to resolve duplicate records later
-    fgData$dateTime[i]=imgData$dateTime[which.min(d)]
+    fgData$dateTime[i]=imgData$dateTime[thisImgDataRow]
   }
 }
 rm(i,d,thisDate)
@@ -350,11 +368,11 @@ fishObs=fishObs[which(fishObs$idx>=1),]
 #remove duplicates from OR join
 fishObs=fishObs[!duplicated(fishObs),]
 
-#consider observations within 2 hours duplicates
+#consider observations of the same fish on the same day duplicates
 #fishObs$hour=format.Date(fishObs$dateTime,"%F:%H")
 
-fishObs$hour=round(as.numeric(format.Date(fishObs$dateTime,"%H"))/2)
-fishObs$hour=paste0(format.Date(fishObs$dateTime,"%F"),"|",fishObs$hour)
+#fishObs$hour=round(as.numeric(format.Date(fishObs$dateTime,"%H"))/4)
+fishObs$hour=paste0(format.Date(fishObs$dateTime,"%F"),"|")# can add hour to this to allow multiple records per day
 fishObs=fishObs[!duplicated(fishObs[,c("idx","hour")]),]
 fishObs$hour=NULL
 
@@ -371,7 +389,7 @@ fishObs$roughDayLocation=NULL
 
 ##############---------build fish details data w/ obs count, species, etc... -----------
 fishDetails=allFish
-fishDetails$recapCount=0
+fishDetails$obsCount=0
 fishDetails$firstObserved=Sys.time()
 fishDetails$lastObserved=Sys.time()
 
@@ -387,7 +405,7 @@ names(fishDetails[names(fishDetails)=="x"])="sources"
 
 for(i in 1:nrow(fishDetails)){
   thisFishIDX=fishDetails[i,"idx"]
-  fishDetails$recapCount[i]=sum(fishObs$idx==thisFishIDX,na.rm = T)
+  fishDetails$obsCount[i]=sum(fishObs$idx==thisFishIDX,na.rm = T)
   fishDetails$firstObserved[i]=min(fishObs$dateTime[which(fishObs$idx==thisFishIDX)],na.rm=T)
   fishDetails$lastObserved[i]=max(fishObs$dateTime[which(fishObs$idx==thisFishIDX)],na.rm=T)
   
@@ -406,7 +424,7 @@ getLongestRecord=function(allRecords){
 
 #currently only looks to readData for details, more info potentially available from other sources?
 
-fishDetails=merge(fishDetails,aggregate(readData[,c("HEX.Tag.ID","Species","Length.Inches","Client")],
+fishDetails=merge(fishDetails,aggregate(readData[,c("HEX.Tag.ID","Species","Length.Inches")],
                                         by=list(hexID=readData$HEX.Tag.ID),
                                         FUN=getLongestRecord),
                   by="hexID",all.x=T,all.y=F)
@@ -427,22 +445,46 @@ fixMix=function(mixed,returnNumeric=F){
 
 fishDetails$Species=fixMix(fishDetails$Species)
 fishDetails$Length.Inches=fixMix(fishDetails$Length.Inches,returnNumeric=T)
-fishDetails$Client=fixMix(fishDetails$Client)
+#fishDetails$Client=fixMix(fishDetails$Client)
+names(fishDetails)[names(fishDetails)=="x"]="sources"
+
+fishDetails=fishDetails[order(fishDetails$obsCount,decreasing = T),]
 
 
-fishDetails=fishDetails[order(fishDetails$recapCount,decreasing = T),]
+###############client list:
+
+clientList=readData[,c("HEX.Tag.ID","Client")]
+clientList=clientList[complete.cases(clientList),]
+clientList$idx=NA
+
+for(i in 1:nrow(clientList)){
+  thisHID=clientList$HEX.Tag.ID[i]
+  if(thisHID %in% allFish$hexID){
+    thisIDX=allFish$idx[allFish$hexID==thisHID]
+  }
+  if(thisHID %in% allFish$l4hex){
+    thisIDX=allFish$idx[allFish$l4hex==thisHID]
+  }
+  
+  if(thisHID %in% allFish$decID){
+    thisIDX=allFish$idx[allFish$decID==thisHID]
+  }
+  if(thisHID %in% allFish$l4dec){
+    thisIDX=allFish$idx[allFish$l4dec==thisHID]
+  }
+  clientList$idx[i]=thisIDX
+}
+
+clientList=merge(clientList[,c("Client","idx")],allFish)
+clientList=unique(clientList)
+
+clientList=clientList[,c("idx","l4hex","Client")]
 
 
-head(fishDetails)
 
 write.csv(fishDetails,file=paste0("fishDetails_",Sys.Date(),".csv"))
-
-
-
-
-##############-build data frame of individual observations ------------
-
-
+write.csv(fishObs,file=paste0("fishObs_",Sys.Date(),".csv"))
+write.csv(clientList,file=paste0("clientLise_",Sys.Date(),".csv"))
 
 
 ##############-------------generate routes----------------------
@@ -603,7 +645,9 @@ plot(st_geometry(network),col="blue")
 plot(st_geometry(obsPoints),add=T)
 plot(st_geometry(allRoutes),add=T,lwd=4)
 
-fishDetails=merge(fishDetails,data.frame(aggregate(allRoutes[,c("idx","routeLength")],by=list(allRoutes$idx),FUN=sum))[,c("idx","routeLength")],all.x=T)
+routeLenDf=data.frame(allRoutes)[,c("idx","routeLength")]
+
+fishDetails=merge(fishDetails,aggregate(formula=routeLength~idx,data=routeLenDf,FUN=sum),all.x=T)
 #plot(st_geometry(allRoutes[20,]),add=T,lwd=4)
 
 #st_write(allRoutes,"allRoutes.gpkg",append=F,overwrite=T)
@@ -695,31 +739,27 @@ readData[readData$HEX.Tag.ID=="3DD.003E281A82",]$LATITUDE.LONGITUDE
 
 
 
-# scdbConnect=function(){
-#   #readRenviron(".Renviron")
-#   conn=dbConnect(RPostgres::Postgres(),
-#                  host="silvercreekdb-do-user-12108041-0.b.db.ondigitalocean.com",
-#                  port="25060",
-#                  dbname="silvercreekdb" ,
-#                  user="dbread",
-#                  password="dbread"
-#                  #password=Sys.getenv("scdb_readPass")
-#   )
-#   return(conn)
-# }
-# conn=scdbConnect()
-# 
-# dbGetQuery(conn,"SELECT * FROM fishlocations LIMIT 10;")
-# 
-# 
-# writeMe=locationTimeseries[,c("last4Hex","time")]
-# names(writeMe)=c("fishid","datetime","geometry")
-# dbWriteTable(conn,"fishlocations",writeMe,overwrite=T)
-# 
-# 
-# #write fish attributes table
-# fishAtt=merge(allFish,readData,by=c("DEC.Tag.ID","HEX.Tag.ID"))
-# fishAtt=fishAtt[,c("last4Hex","Species","Length.Inches","Client","HEX.Tag.ID","DEC.Tag.ID")]
-# names(fishAtt)=c("fishid","species","length","clientname","full_id_hex","full_id_dec")
-# fishAtt=unique(fishAtt)
-# dbWriteTable(conn,"fishattributes",fishAtt,overwrite=T)
+scdbConnect=function(){
+  #readRenviron(".Renviron")
+  conn=dbConnect(RPostgres::Postgres(),
+                 host="silvercreekdb-do-user-12108041-0.b.db.ondigitalocean.com",
+                 port="25060",
+                 dbname="silvercreekdb" ,
+                 user="dbread",
+                 password="dbread"
+                 #password=Sys.getenv("scdb_readPass")
+  )
+  return(conn)
+}
+conn=scdbConnect()
+
+dbGetQuery(conn,"SELECT * FROM fishlocations LIMIT 10;")
+
+
+writeMe=locationTimeseries[,c("idx","time")]
+names(writeMe)=c("fishid","datetime","geometry")
+dbWriteTable(conn,"fishlocations",writeMe,overwrite=T)
+
+
+#write fish details table
+dbWriteTable(conn,"fishDetails",fishDetails,overwrite=T)

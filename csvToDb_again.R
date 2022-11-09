@@ -448,8 +448,8 @@ fishDetails$Length.Inches=fixMix(fishDetails$Length.Inches,returnNumeric=T)
 #fishDetails$Client=fixMix(fishDetails$Client)
 names(fishDetails)[names(fishDetails)=="x"]="sources"
 
+fishDetails=fishDetails[fishDetails$obsCount>=1,]
 fishDetails=fishDetails[order(fishDetails$obsCount,decreasing = T),]
-
 
 ###############client list:
 
@@ -652,8 +652,9 @@ fishDetails=merge(fishDetails,aggregate(formula=routeLength~idx,data=routeLenDf,
 
 #st_write(allRoutes,"allRoutes.gpkg",append=F,overwrite=T)
 
-
-
+fishDetails$routeLength_km=as.numeric(fishDetails$routeLength/1000)
+fishDetails$routeLength=NULL
+fishDetails=fishDetails[order(fishDetails$obsCount,decreasing = T),]
 ############# routes to location timeseries-----------------
 
 calculateRoutePoints=function(startLoc,endLoc,startTime,endTime,routes,timestep="hours"){
@@ -757,6 +758,7 @@ dbGetQuery(conn,"SELECT * FROM fishlocations LIMIT 10;")
 
 
 writeMe=locationTimeseries[,c("idx","time")]
+
 names(writeMe)=c("fishid","datetime","geometry")
 dbWriteTable(conn,"fishlocations",writeMe,overwrite=T)
 

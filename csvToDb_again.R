@@ -1,7 +1,24 @@
-library(Rmpfr)
+#library(Rmpfr)
 library(readxl)
 library(DBI)
 library(RPostgres)
+library(curl)
+
+scdbConnect=function(){
+  #readRenviron(".Renviron")
+  conn=dbConnect(RPostgres::Postgres(),
+                 host="silvercreekdb-do-user-12108041-0.b.db.ondigitalocean.com",
+                 port="25060",
+                 dbname="silvercreekdb" ,
+                 user="dbread",
+                 password="dbread"
+                 #password=Sys.getenv("scdb_readPass")
+  )
+  return(conn)
+}
+conn=scdbConnect()
+
+
 #read ftp data, build fish IDS and routes
 #all outside of shiny (for now)
 defaultTime="11:00:00"
@@ -14,7 +31,11 @@ last4=function(ID){
 
 #still breaks w/ spaces...
 dlTroutData=function(){
-  library(curl)
+  
+  rebuildAll=T
+  
+  existingData=dbGetQuery(conn, "SELECT * FROM fishdatasources")
+  
   destDir=getwd()
   
   destDir=paste0(destDir,"/troutDL_",Sys.Date())
@@ -30,11 +51,14 @@ dlTroutData=function(){
     for(fName in fileNames){
       this.url=paste0(baseUrl,fName)
       this.dest=paste0(saveDir,"/",fName)
-      print(this.url)
-      try(
-        curl_download(url=this.url,destfile = this.dest,handle=sscHandle),
-        silent=F
-      )
+      print(fName)
+      if( any(!(fName %in% existingData$source), rebuildAll==T ) ){
+        try(
+          curl_download(url=this.url,destfile = this.dest,handle=sscHandle),
+          silent=F
+        )
+        dbWriteTable(conn, "fishdatasources", data.frame(source=fName),append=T)
+      }
     }
   }
   
@@ -65,9 +89,9 @@ dlTroutData=function(){
   return(destDir)
 }
 
-#dataDir=dlTroutData()
+dataDir=dlTroutData()
 
-dataDir="C:/Users/sam/Documents/SilverCreek/R/SilverCreekFishTracker/troutDL_2022-11-07"
+#dataDir="C:/Users/sam/Documents/SilverCreek/R/SilverCreekFishTracker/troutDL_2022-11-21"
 
 #need: list of all fish ids, locationTimeseries(s), fish metadata (species, size, ,'owner', image, notes)
 #also - keep track of all files included
@@ -83,55 +107,59 @@ updateData=function(subDir,baseDir=dataDir,headers,skipLines=0,renames=renameKey
   addFiles=files[!files%in%includedFiles]
   
   for(file in files){#change to 'in addFiles'
+    print(file)
     try({
       if( grepl(".xls",file) ){
         thisData=data.frame(read_excel(paste0(baseDir,"/",file),skip=skipLines,.name_repair = "minimal"),stringsAsFactors = F)
-      } else {
+      } 
+      if( grepl(".csv",file) ){
         thisData=read.csv(paste0(baseDir,"/",file),skip=skipLines,stringsAsFactors = F)
       }
       
       
-      for(n in 1:length(names(thisData))){
-        if(names(thisData)[n] %in% renameDF$old ){
-          names(thisData)[n] = renameDF$new[renameDF$old==names(thisData)[n]]
+      if(exists("thisData")){
+        for(n in 1:length(names(thisData))){
+          if(names(thisData)[n] %in% renameDF$old ){
+            names(thisData)[n] = renameDF$new[renameDF$old==names(thisData)[n]]
+          }
         }
-      }
-      
-      
-      if(all(c("obs2_location","obs2_date") %in% names(thisData))){
-        addRows=thisData
-        addRows$LATITUDE.LONGITUDE=addRows$obs2_location
-        addRows$Scan.Date=addRows$obs2_date
-        thisData=rbind(thisData,addRows)
-      }
-      
-      if(all(c("obs3_location","obs3_date") %in% names(thisData))){
-        addRows=thisData
-        addRows$LATITUDE.LONGITUDE=addRows$obs3_location
-        addRows$Scan.Date=addRows$obs3_date
-        thisData=rbind(thisData,addRows)
-      }
-      
-      
-      print(paste('columns [',paste(names(thisData)[!names(thisData)%in% c(headers,renameDF$old,renameDF$new)],collapse=', '),'] dropped from',file))
-      thisData=thisData[,names(thisData)%in% headers]
-      
-      
-      thisData$sourceFile=file
-      
-      #to add
-      addCols=headers[!(headers %in% names(thisData))]
-      print(paste('columns [',paste(addCols,collapse=', '),'] added to',file))
-      if(length(addCols)>0){
-        for(i in 1:length(addCols)){
-          thisData[,addCols[i]]=NA
-          #print(thisData)
+        
+        
+        if(all(c("obs2_location","obs2_date") %in% names(thisData))){
+          addRows=thisData
+          addRows$LATITUDE.LONGITUDE=addRows$obs2_location
+          addRows$Scan.Date=addRows$obs2_date
+          thisData=rbind(thisData,addRows)
         }
-      }
-      if(!exists("allData")){
-        allData=thisData
-      } else {
-        allData=rbind(allData,thisData)
+        
+        if(all(c("obs3_location","obs3_date") %in% names(thisData))){
+          addRows=thisData
+          addRows$LATITUDE.LONGITUDE=addRows$obs3_location
+          addRows$Scan.Date=addRows$obs3_date
+          thisData=rbind(thisData,addRows)
+        }
+        
+        
+        print(paste('columns [',paste(names(thisData)[!names(thisData)%in% c(headers,renameDF$old,renameDF$new)],collapse=', '),'] dropped from',file))
+        thisData=thisData[,names(thisData)%in% headers]
+        
+        
+        thisData$sourceFile=file
+        
+        #to add
+        addCols=headers[!(headers %in% names(thisData))]
+        print(paste('columns [',paste(addCols,collapse=', '),'] added to',file))
+        if(length(addCols)>0){
+          for(i in 1:length(addCols)){
+            thisData[,addCols[i]]=NA
+            #print(thisData)
+          }
+        }
+        if(!exists("allData")){
+          allData=thisData
+        } else {
+          allData=rbind(allData,thisData)
+        }
       }
     })
   }
@@ -234,37 +262,48 @@ mobData$dateTime=as.POSIXct(mobData$Date.Time,format="%m/%d/%Y %H:%M")
 readData=updateData("Reader_Data",headers=c("Scan.Date","Scan.Time","Reader.ID","HEX.Tag.ID","DEC.Tag.ID","LATITUDE.LONGITUDE","Species","Length.Inches","Client"))
 
 readDataCoord=function(latLon,which="lat"){
+  latLon=as.character(latLon)
   #print(latLon)
-  #print(!is.na(latLon) & nchar(latLon)>=6)
-  if( !is.na(latLon) & nchar(latLon)>=6){
-    latLon=sub(" ","",latLon)
-    latLon=strsplit(latLon,",")[[1]]
+  if(!is.na(latLon)){
+    oldstr=""
+    newstr="n"
+    while(!oldstr==newstr){
+      oldstr=newstr
+      try(expr={newstr=substring(latLon,0,nchar(oldstr)+1)},silent=T)
+    }
+    latLon=newstr
+  }
+
+#print(!is.na(latLon) & nchar(latLon)>=6)
+if( !is.na(latLon) & nchar(latLon)>=6){
+  latLon=sub(" ","",latLon)
+  latLon=strsplit(latLon,",")[[1]]
+  if(length(latLon)==2){
+    lat=as.numeric(latLon[1])
+    lon=as.numeric(latLon[2])
+  } else {
+    latLon=strsplit(latLon,"-")[[1]]
     if(length(latLon)==2){
       lat=as.numeric(latLon[1])
       lon=as.numeric(latLon[2])
+      lon=-lon
     } else {
-      latLon=strsplit(latLon,"-")[[1]]
-      if(length(latLon)==2){
-        lat=as.numeric(latLon[1])
-        lon=as.numeric(latLon[2])
-        lon=-lon
-      } else {
-        lat=NA
-        lon=NA
-      }
+      lat=NA
+      lon=NA
     }
-  } else {
-    lat=NA
-    lon=NA
   }
-  #print(paste0(lat,", ",lon))
-  if(which=="lat"){
-    return(lat)
-  }
-  if(which=="lon"){
-    return(lon)
-  }
-  
+} else {
+  lat=NA
+  lon=NA
+}
+#print(paste0(lat,", ",lon))
+if(which=="lat"){
+  return(lat)
+}
+if(which=="lon"){
+  return(lon)
+}
+
 }
 
 
@@ -357,6 +396,8 @@ fishObs=rbind(fishObs,
 fishObs=rbind(fishObs,
               merge(allFish,mobData[,c("Tag_ID",'dateTime','lat','lon','sourceFile')],by.x="hexID",by.y="Tag_ID",all=F,incomparables=NA))
 
+fishObs$dateTime[as.Date(fishObs$dateTime)=="2022-04-27"] = as.POSIXct("2022-04-28 11:00:00")
+
 allFishObs=fishObs
 
 #
@@ -371,14 +412,17 @@ fishObs=fishObs[!duplicated(fishObs),]
 #consider observations of the same fish on the same day duplicates
 #fishObs$hour=format.Date(fishObs$dateTime,"%F:%H")
 
-#fishObs$hour=round(as.numeric(format.Date(fishObs$dateTime,"%H"))/4)
+#fishObs$hour=round(as.numeric(format.Date(fishObs$dateTime,"%H"))/4)\
+
+###############-------exclude fish observations within 2 days-----------------------
+
 fishObs$hour=paste0(format.Date(fishObs$dateTime,"%F"),"|")# can add hour to this to allow multiple records per day
 fishObs=fishObs[!duplicated(fishObs[,c("idx","hour")]),]
 fishObs$hour=NULL
 
 #Also remove same day same place as dups
 #this could be sunstantially improved by creating a set of spatial points and calculating distance
-#round to (1/10000) is a roughly 10 m lat tolerance, 7 m long tolerance
+#round to (1/10000) is a roughly 10 m y tolerance, 7 m x tolerance
 fishObs$roughDayLocation=paste0(round(fishObs$lat,4),"|",
                                 round(fishObs$lon,4),"|",
                                 format.Date(fishObs$dateTime,"%F"))
@@ -484,7 +528,7 @@ clientList=clientList[,c("idx","l4hex","Client")]
 
 write.csv(fishDetails,file=paste0("fishDetails_",Sys.Date(),".csv"))
 write.csv(fishObs,file=paste0("fishObs_",Sys.Date(),".csv"))
-write.csv(clientList,file=paste0("clientLise_",Sys.Date(),".csv"))
+write.csv(clientList,file=paste0("clientList_",Sys.Date(),".csv"))
 
 
 ##############-------------generate routes----------------------
@@ -496,8 +540,13 @@ library(gdistance)
 library(raster) #still needed for type conversions within gdistance::transition
 
 #sources
-netDSN="C:/Users/sam/Documents/spatial/SilverCreek/SilverCreekNet.gpkg"
+#windows
+netDSN="C:/Users/sam/Dropbox/SilverCreek/SilverCreekSpatial/StaticData/SilverCreekNet_revised.gpkg"
+#linux
+netDSN="/home/sam/Dropbox/SilverCreek/SilverCreekSpatial/StaticData/SilverCreekNet_revised.gpkg"
+
 netName="SilverCreek"
+
 
 #load data
 network=st_read(dsn=netDSN,layer=netName)
@@ -621,6 +670,7 @@ buildRoute=function(idx,from,to,costSurf,obsPoints){
                        output="SpatialLines")
     
     route=st_as_sf(route)
+    st_crs(route)=st_crs(obsPoints)
     route=st_transform(route,crs=st_crs(26911))
   }
   route$routeName=routeName
@@ -647,7 +697,7 @@ plot(st_geometry(allRoutes),add=T,lwd=4)
 
 routeLenDf=data.frame(allRoutes)[,c("idx","routeLength")]
 
-fishDetails=merge(fishDetails,aggregate(formula=routeLength~idx,data=routeLenDf,FUN=sum),all.x=T)
+fishDetails=merge(fishDetails,aggregate(routeLength~idx,data=routeLenDf,FUN=sum),all.x=T)
 #plot(st_geometry(allRoutes[20,]),add=T,lwd=4)
 
 #st_write(allRoutes,"allRoutes.gpkg",append=F,overwrite=T)
@@ -738,23 +788,12 @@ readData[readData$HEX.Tag.ID=="3DD.003E281A82",]$LATITUDE.LONGITUDE
 
 
 
+hist(allFishObs$dateTime,breaks="months")
+
+##########--------------write to db-------
 
 
-scdbConnect=function(){
-  #readRenviron(".Renviron")
-  conn=dbConnect(RPostgres::Postgres(),
-                 host="silvercreekdb-do-user-12108041-0.b.db.ondigitalocean.com",
-                 port="25060",
-                 dbname="silvercreekdb" ,
-                 user="dbread",
-                 password="dbread"
-                 #password=Sys.getenv("scdb_readPass")
-  )
-  return(conn)
-}
-conn=scdbConnect()
-
-dbGetQuery(conn,"SELECT * FROM fishlocations LIMIT 10;")
+#dbGetQuery(conn,"SELECT * FROM fishlocations LIMIT 10;")
 
 
 writeMe=locationTimeseries[,c("idx","time")]
@@ -764,4 +803,8 @@ dbWriteTable(conn,"fishlocations",writeMe,overwrite=T)
 
 
 #write fish details table
-dbWriteTable(conn,"fishDetails",fishDetails,overwrite=T)
+dbWriteTable(conn,"fishdetails",fishDetails,overwrite=T)
+
+dbWriteTable(conn,"clientfish",clientList,overwrite=T)
+
+max(fishObs$dateTime)
